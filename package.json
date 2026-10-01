@@ -1,0 +1,30 @@
+{
+  "name": "shipnow-api",
+  "version": "1.0.0",
+  "description": "API REST de ShipNow: usuarios, productos, pedidos y entregas con arquitectura por capas (Controller → Service → Repository)",
+  "main": "src/server.js",
+  "type": "module",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js"
+  },
+  "keywords": [
+    "express",
+    "mongodb",
+    "mongoose",
+    "api-rest",
+    "arquitectura-por-capas"
+  ],
+  "license": "ISC",
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@faker-js/faker": "^10.6.0",
+    "bcryptjs": "^3.0.3",
+    "dotenv": "^18.0.5",
+    "express": "^5.2.1",
+    "mongoose": "^9.10.3",
+    "zod": "^4.6.5"
+  }
+}
