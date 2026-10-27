@@ -1,23 +1,35 @@
 import app from './app.js';
 import { config, connectDatabase, disconnectDatabase } from './config/index.js';
+import { closeLogger } from './config/logger.config.js';
+import { logger } from './utils/logger.js';
+
+// Registra la falla como fatal, espera a que se escriba el log y termina el proceso.
+const exitWithFatal = async (message, error) => {
+  logger.fatal(`${message}: ${error?.message ?? error}`, { stack: error?.stack });
+  await closeLogger(logger);
+  process.exit(1);
+};
+
+process.on('uncaughtException', (error) => exitWithFatal('Excepción no controlada', error));
+process.on('unhandledRejection', (reason) => exitWithFatal('Promesa rechazada sin manejar', reason));
 
 const start = async () => {
   try {
     await connectDatabase();
   } catch (error) {
-    console.error(`[db] ❌ No se pudo conectar a MongoDB: ${error.message}`);
-    process.exit(1);
+    await exitWithFatal('No se pudo conectar a MongoDB, la API no puede arrancar', error);
   }
 
   const server = app.listen(config.port, () => {
-    console.info(`[server] ShipNow API escuchando en http://localhost:${config.port} (${config.nodeEnv})`);
+    logger.info(`Servidor ShipNow escuchando en el puerto ${config.port} (entorno: ${config.nodeEnv})`);
   });
 
-  // Apagado prolijo: deja de aceptar conexiones y cierra la base
+  // Apagado prolijo: deja de aceptar conexiones, cierra la base y el logger
   const shutdown = (signal) => {
-    console.info(`[server] ${signal} recibido, cerrando...`);
+    logger.info(`${signal} recibido, cerrando el servidor...`);
     server.close(async () => {
       await disconnectDatabase();
+      await closeLogger(logger);
       process.exit(0);
     });
   };

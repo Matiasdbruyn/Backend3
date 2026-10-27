@@ -3,6 +3,7 @@ import { BCRYPT_SALT_ROUNDS, USER_ROLES } from '../constants/index.js';
 import { EmailAlreadyExistsError, UserNotFoundError, ValidationError } from '../errors/index.js';
 import { userRepository } from '../repositories/user.repository.js';
 import { assertValidId } from '../utils/ids.js';
+import { logger } from '../utils/logger.js';
 import { buildPagination } from '../utils/pagination.js';
 import { validate } from '../validators/common.validator.js';
 import {
@@ -40,7 +41,9 @@ export class UserService {
     }
 
     payload.password = await hashPassword(payload.password);
-    return this.userRepository.create(payload);
+    const user = await this.userRepository.create(payload);
+    logger.info(`Usuario ${user._id} creado (${user.email}, rol ${user.role})`);
+    return user;
   }
 
   async updateUser(id, data) {
@@ -60,13 +63,16 @@ export class UserService {
     }
     if (changes.password) changes.password = await hashPassword(changes.password);
 
-    return this.userRepository.updateById(id, changes);
+    const updated = await this.userRepository.updateById(id, changes);
+    logger.info(`Usuario ${id} actualizado (${Object.keys(changes).join(', ')})`);
+    return updated;
   }
 
   async deleteUser(id) {
     assertValidId(id);
     const deleted = await this.userRepository.deleteById(id);
     if (!deleted) throw new UserNotFoundError({ id });
+    logger.info(`Usuario ${id} eliminado (${deleted.email})`);
     return deleted;
   }
 

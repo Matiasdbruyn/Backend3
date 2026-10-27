@@ -11,6 +11,7 @@ import { deliveryRepository } from '../repositories/delivery.repository.js';
 import { orderRepository } from '../repositories/order.repository.js';
 import { productRepository } from '../repositories/product.repository.js';
 import { userRepository } from '../repositories/user.repository.js';
+import { logger } from '../utils/logger.js';
 import { validate } from '../validators/common.validator.js';
 import {
   mockUsersQuerySchema,
@@ -36,15 +37,16 @@ export class MocksService {
   generateUsers({ qty, role }) {
     const quantity = parseMockQuantity(qty);
     const filters = validate(mockUsersQuerySchema, { role });
-    return createMany(quantity, () => createMockUser({ role: filters.role }));
+    return logGenerated('usuarios', createMany(quantity, () => createMockUser({ role: filters.role })));
   }
 
   generateCouriers({ qty }) {
-    return createMany(parseMockQuantity(qty), () => createMockUser({ role: USER_ROLES.COURIER }));
+    const quantity = parseMockQuantity(qty);
+    return logGenerated('repartidores', createMany(quantity, () => createMockUser({ role: USER_ROLES.COURIER })));
   }
 
   generateProducts({ qty }) {
-    return createMany(parseMockQuantity(qty), () => createMockProduct());
+    return logGenerated('productos', createMany(parseMockQuantity(qty), () => createMockProduct()));
   }
 
   generateOrders({ qty }) {
@@ -55,7 +57,7 @@ export class MocksService {
       products: Math.max(3, Math.ceil(quantity / 2)),
       orders: quantity,
     });
-    return orders;
+    return logGenerated('pedidos', orders);
   }
 
   generateDeliveries({ qty }) {
@@ -67,12 +69,14 @@ export class MocksService {
       qty: quantity,
       onlyWithDelivery: true,
     });
-    return deliveries;
+    return logGenerated('entregas', deliveries);
   }
 
   // Set completo y relacionado (los _id coinciden entre entidades)
   generateDataset(query) {
-    return buildMockDataset(parseDatasetCounts(query));
+    const dataset = buildMockDataset(parseDatasetCounts(query));
+    logger.info(`Mocks: set de datos relacionado generado (sin guardar) ${JSON.stringify(countAll(dataset))}`);
+    return dataset;
   }
 
   // ─── Inserción controlada en MongoDB ───────────────────────────────────────
@@ -87,6 +91,7 @@ export class MocksService {
 
     const result = { inserted: inserted[collection], collection };
     if (collection === MOCK_COLLECTIONS.ORDERS) result.relatedDeliveries = inserted.deliveries;
+    logger.info(`Mocks: se insertaron ${result.inserted} registros de prueba en "${collection}"`);
     return result;
   }
 
@@ -94,6 +99,7 @@ export class MocksService {
   async generateData(body) {
     const counts = parseDatasetCounts(body);
     const inserted = await this.#persist(buildMockDataset(counts));
+    logger.info(`Mocks: set de datos de prueba insertado en MongoDB ${JSON.stringify(inserted)}`);
     return { inserted, defaultPassword: MOCKS.DEFAULT_PASSWORD };
   }
 
@@ -162,6 +168,9 @@ export class MocksService {
       return inserted;
     } catch (error) {
       const rolledBack = await this.#rollback(attempted);
+      if (rolledBack) {
+        logger.warning(`Mocks: la carga falló en "${currentStep}", se revirtieron los registros insertados`);
+      }
       throw new MockSeedError(error, { failedCollection: currentStep, rolledBack });
     }
   }
@@ -173,11 +182,21 @@ export class MocksService {
       }
       return true;
     } catch (error) {
-      console.error('[mocks] No se pudo revertir la carga parcial de datos de prueba:', error);
+      logger.error(`Mocks: no se pudo revertir la carga parcial de datos de prueba: ${error.message}`, {
+        stack: error.stack,
+      });
       return false;
     }
   }
 }
+
+const countAll = (dataset) =>
+  Object.fromEntries(Object.entries(dataset).map(([key, list]) => [key, list.length]));
+
+const logGenerated = (label, list) => {
+  logger.info(`Mocks: se generaron ${list.length} ${label} simulados (sin guardar)`);
+  return list;
+};
 
 export const mocksService = new MocksService({
   userRepository,

@@ -22,6 +22,7 @@ import {
 import { deliveryRepository } from '../repositories/delivery.repository.js';
 import { userRepository } from '../repositories/user.repository.js';
 import { assertValidId } from '../utils/ids.js';
+import { logger } from '../utils/logger.js';
 import { buildPagination } from '../utils/pagination.js';
 import { validate } from '../validators/common.validator.js';
 import {
@@ -108,7 +109,7 @@ export class DeliveryService {
       statusHistory.push(buildHistoryEntry(DELIVERY_STATUS.ASSIGNED, 'Repartidor asignado', now));
     }
 
-    return this.deliveryRepository.create({
+    const delivery = await this.deliveryRepository.create({
       order: orderId,
       courier: courierId ?? null,
       trackingCode: generateTrackingCode(),
@@ -117,6 +118,12 @@ export class DeliveryService {
       estimatedDeliveryDate: estimatedDeliveryDate ?? calculateEstimatedDeliveryDate(order.priority, now),
       statusHistory,
     });
+
+    logger.info(`Entrega ${delivery.trackingCode} creada para el pedido ${orderId}`);
+    if (!courierId) {
+      logger.warning(`Pedido ${orderId} sin repartidor asignado (entrega ${delivery.trackingCode})`);
+    }
+    return delivery;
   }
 
   async assignCourier(id, data) {
@@ -132,14 +139,14 @@ export class DeliveryService {
     const courier = await this.#getCourier(courierId);
     const verb = delivery.courier ? 'reasignado' : 'asignado';
 
-    return this.deliveryRepository.updateById(
+    const note = `Repartidor ${verb}: ${courier.firstName} ${courier.lastName}`;
+    const updated = await this.deliveryRepository.updateById(
       id,
       { courier: courierId, status: DELIVERY_STATUS.ASSIGNED },
-      buildHistoryEntry(
-        DELIVERY_STATUS.ASSIGNED,
-        `Repartidor ${verb}: ${courier.firstName} ${courier.lastName}`,
-      ),
+      buildHistoryEntry(DELIVERY_STATUS.ASSIGNED, note),
     );
+    logger.info(`Entrega ${delivery.trackingCode}: ${note}`);
+    return updated;
   }
 
   async updateDeliveryStatus(id, data) {
@@ -168,7 +175,15 @@ export class DeliveryService {
 
     const changes = { status };
     if (status === DELIVERY_STATUS.DELIVERED) changes.deliveredAt = new Date();
-    return this.deliveryRepository.updateById(id, changes, buildHistoryEntry(status, note));
+    const updated = await this.deliveryRepository.updateById(id, changes, buildHistoryEntry(status, note));
+
+    const transition = `Entrega ${delivery.trackingCode}: estado "${delivery.status}" → "${status}"`;
+    if (status === DELIVERY_STATUS.FAILED) {
+      logger.warning(`${transition}${note ? ` (${note})` : ''}`);
+    } else {
+      logger.info(transition);
+    }
+    return updated;
   }
 
   // Regla de negocio: solo un usuario con rol courier puede repartir.

@@ -2,14 +2,17 @@
 
 API REST para **ShipNow**, una plataforma de pedidos y entregas a domicilio. Gestiona **usuarios** (clientes, repartidores y administradores), **productos**, **pedidos** y **entregas** con seguimiento por código.
 
-El proyecto está construido con una **arquitectura por capas** (Controller → Service → Repository), configuración de entorno validada al arranque, un **módulo de mocking** para generar datos de prueba y un **manejo de errores centralizado**.
+El proyecto está construido con una **arquitectura por capas** (Controller → Service → Repository), configuración de entorno validada al arranque, un **módulo de mocking** para generar datos de prueba, **manejo de errores centralizado**, **logging con Winston**, **documentación con Swagger** y **tests funcionales** con Mocha, Chai y Supertest.
 
 | Entrega | Contenido | Estado |
 | --- | --- | --- |
 | Pre-entrega 1 | Arquitectura por capas, configuración de entorno validada, constantes | ✅ |
 | Pre-entrega 2 | Módulo de mocks (`/api/mocks`) y carga de datos de prueba | ✅ |
 | Pre-entrega 3 | Errores personalizados, diccionario de errores y middleware global | ✅ |
-| Entrega final | Logging (Winston), Swagger, tests, Multer, Docker | ⏳ |
+| Pre-entrega 4 | Logging con Winston: niveles, archivos con rotación, endpoint de prueba | ✅ |
+| Pre-entrega 5 | Documentación con Swagger en `/api/docs` | ✅ |
+| Pre-entrega 6 | Tests funcionales con Mocha, Chai y Supertest (`npm test`) | ✅ |
+| Entrega final | Carga de archivos (Multer), health check, Docker | ⏳ |
 
 ---
 
@@ -25,6 +28,9 @@ El proyecto está construido con una **arquitectura por capas** (Controller → 
 8. [Endpoints](#endpoints)
 9. [Módulo de mocks (pre-entrega 2)](#módulo-de-mocks-pre-entrega-2)
 10. [Manejo de errores (pre-entrega 3)](#manejo-de-errores-pre-entrega-3)
+11. [Logging con Winston (pre-entrega 4)](#logging-con-winston-pre-entrega-4)
+12. [Documentación con Swagger (pre-entrega 5)](#documentación-con-swagger-pre-entrega-5)
+13. [Testing (pre-entrega 6)](#testing-pre-entrega-6)
 
 ---
 
@@ -37,6 +43,9 @@ El proyecto está construido con una **arquitectura por capas** (Controller → 
 - **Zod 4**: validación de datos de entrada (mensajes en español)
 - **@faker-js/faker**: generación de datos simulados
 - **bcryptjs**: hash de contraseñas
+- **Winston** + **winston-daily-rotate-file**: logging con niveles y archivos rotados por día
+- **swagger-ui-express**: documentación interactiva (OpenAPI 3)
+- **Mocha**, **Chai**, **Supertest** y **mongodb-memory-server**: tests funcionales
 
 ## Instalación y ejecución local
 
@@ -61,14 +70,17 @@ Levantar la API:
 ```bash
 npm run dev     # desarrollo (se reinicia al guardar cambios)
 npm start       # modo normal
+npm test        # suite de tests (no necesita MongoDB instalado, ver "Testing")
 ```
 
 Si todo está bien, la consola muestra:
 
 ```
-[db] Conectado a MongoDB (127.0.0.1/shipnow)
-[server] ShipNow API escuchando en http://localhost:8080 (development)
+2026-10-27 11:26:04 [info]    Conexión a MongoDB establecida (127.0.0.1/shipnow)
+2026-10-27 11:26:04 [info]    Servidor ShipNow escuchando en el puerto 8080 (entorno: development)
 ```
+
+Con el servidor levantado, la documentación interactiva queda en **http://localhost:8080/api/docs**.
 
 Para tener datos con los que probar, lo más rápido es cargar un set completo de prueba:
 
@@ -87,39 +99,43 @@ Todas las variables se leen en un único archivo: [`src/config/env.config.js`](s
 | `PORT` | Sí | Puerto HTTP (entero entre 1 y 65535) | `8080` |
 | `MONGODB_URI` | Sí | URI de conexión (`mongodb://` o `mongodb+srv://`) | `mongodb://127.0.0.1:27017/shipnow` |
 | `NODE_ENV` | Sí | `development`, `production` o `test` | `development` |
+| `LOG_LEVEL` | No | Nivel mínimo de log. Por defecto: `debug` en development, `info` en production y test | `info` |
+| `LOG_DIR` | No | Carpeta de los archivos de log (por defecto `logs`) | `logs` |
 
 ### Validación al arranque (fail fast)
 
-La configuración se valida **antes** de levantar el servidor. Si falta una variable crítica o tiene un valor inválido, la app muestra un error descriptivo y **no arranca** (código de salida 1). Por ejemplo, si se borra `MONGODB_URI` del `.env`:
+La configuración se valida **antes** de levantar el servidor. Si falta una variable crítica o tiene un valor inválido, la app registra un error **fatal** (en consola y en `logs/error-AAAA-MM-DD.log`) y **no arranca** (código de salida 1). Por ejemplo, si se borra `MONGODB_URI` del `.env`:
 
 ```
-[config] ❌ Faltan variables de entorno obligatorias: MONGODB_URI.
+2026-10-27 11:29:41 [fatal]   Configuración inválida, la API no puede arrancar. Faltan variables de entorno obligatorias: MONGODB_URI.
   Copiá el archivo .env.example como .env y completá los valores.
 ```
 
 Y si los valores existen pero son inválidos:
 
 ```
-[config] ❌ Variables de entorno inválidas:
+2026-10-27 11:29:41 [fatal]   Configuración inválida, la API no puede arrancar. Variables de entorno inválidas:
   - PORT debe ser un número entero entre 1 y 65535 (recibido: "abc")
   - MONGODB_URI debe comenzar con "mongodb://" o "mongodb+srv://"
   - NODE_ENV debe ser uno de: development, production, test (recibido: "prod")
 ```
 
-El archivo `.env` está en `.gitignore`; en el repositorio solo se versiona `.env.example`.
+El archivo `.env` está en `.gitignore`. En el repositorio se versionan solo `.env.example` (plantilla) y `.env.test` (entorno de testing, sin secretos).
 
 ## Estructura del proyecto
 
 ```
 src/
-├── app.js                  # Configuración de Express (sin listen, testeable)
+├── app.js                  # Configuración de Express (sin listen: los tests la importan directo)
 ├── server.js               # Punto de entrada: conecta a MongoDB y levanta el servidor
 ├── config/
 │   ├── env.config.js       # dotenv + validación de variables (único acceso a process.env)
 │   ├── database.js         # Conexión / desconexión de MongoDB
+│   ├── logger.config.js    # Configuración de Winston (niveles, formato, archivos, rotación)
+│   ├── swagger.config.js   # Monta Swagger UI en /api/docs
 │   └── index.js
 ├── constants/
-│   └── index.js            # Roles, estados, prioridades, transiciones, límites (Object.freeze)
+│   └── index.js            # Roles, estados, prioridades, transiciones, niveles de log (Object.freeze)
 ├── routes/                 # Solo conectan path → método del controller
 ├── controllers/            # Entrada HTTP: leen req, llaman al service, responden
 ├── services/               # Lógica de negocio y reglas del dominio
@@ -128,14 +144,21 @@ src/
 ├── validators/             # Schemas de Zod para validar body y query params
 ├── mocks/
 │   └── generators.js       # Generadores de datos simulados con Faker
+├── docs/                   # Especificación OpenAPI (separada de las rutas)
+│   ├── openapi.js          # Info general, servidor, tags
+│   ├── components/         # Schemas, respuestas y parámetros reutilizables
+│   └── paths/              # Un archivo por módulo (users, products, orders, ...)
 ├── errors/
 │   ├── errorDictionary.js  # Diccionario de errores (código, status HTTP, mensaje)
 │   ├── AppError.js         # Error base
 │   └── customErrors.js     # Errores personalizados del dominio
 ├── middlewares/
+│   ├── requestLogger.middleware.js  # Log http de cada request
 │   ├── notFound.middleware.js
-│   └── errorHandler.middleware.js   # Middleware global de errores
-└── utils/                  # Helpers (respuesta exitosa, paginación, validación de ids)
+│   └── errorHandler.middleware.js   # Middleware global de errores (+ log)
+└── utils/                  # Logger de la app, respuesta exitosa, paginación, validación de ids
+tests/                      # Tests funcionales (un archivo por recurso) + helpers
+logs/                       # Archivos de log generados (ignorados por Git)
 ```
 
 ## Arquitectura por capas
@@ -306,7 +329,15 @@ Ciclo de vida: `pending → assigned → in_transit → delivered`, con `failed`
 
 ### Mocks — `/api/mocks`
 
-Ver la sección siguiente.
+Ver [Módulo de mocks](#módulo-de-mocks-pre-entrega-2).
+
+### Logger y documentación
+
+| Método | Ruta | Descripción |
+| --- | --- | --- |
+| GET | `/api/logger/test` | Herramienta interna: genera un log de cada nivel (ver [Logging](#logging-con-winston-pre-entrega-4)) |
+| GET | `/api/docs` | Swagger UI (ver [Swagger](#documentación-con-swagger-pre-entrega-5)) |
+| GET | `/api/docs/openapi.json` | Especificación OpenAPI en JSON |
 
 ## Módulo de mocks (pre-entrega 2)
 
@@ -611,3 +642,210 @@ Si MongoDB se cae durante una carga de mocks, la API revierte lo que alcanzó a 
   "timestamp": "2026-10-01T16:20:00.000Z"
 }
 ```
+
+## Logging con Winston (pre-entrega 4)
+
+La API usa **Winston** como logger centralizado en lugar de `console.log()`. La configuración está en [`src/config/logger.config.js`](src/config/logger.config.js) y la instancia que usa toda la app en [`src/utils/logger.js`](src/utils/logger.js):
+
+```js
+import { logger } from '../utils/logger.js';
+
+logger.info('Pedido creado');
+logger.warning('Pedido sin repartidor asignado');
+logger.error('Falló la creación del pedido');
+```
+
+### Niveles
+
+De más grave a menos grave (definidos en `LOG_LEVELS`, en las constantes):
+
+| Nivel | Prioridad | Se usa para |
+| --- | --- | --- |
+| `fatal` | 0 | Fallas críticas: configuración inválida, MongoDB caído al arrancar, excepciones no controladas |
+| `error` | 1 | Errores inesperados del servidor (respuestas 5xx), falla al crear un pedido, rollback fallido de mocks |
+| `warning` | 2 | Errores esperados o de negocio (respuestas 4xx), producto sin stock, entrega sin repartidor o fallida |
+| `info` | 3 | Eventos importantes: servidor iniciado, conexión a MongoDB, pedidos/entregas creados, cambios de estado, mocks generados |
+| `http` | 4 | Cada request: método, ruta, status y duración |
+| `debug` | 5 | Detalle interno (reserva y devolución de stock) |
+
+Formato de cada línea (igual en consola y archivo):
+
+```
+2026-10-27 11:26:04 [info]    Servidor ShipNow escuchando en el puerto 8080 (entorno: development)
+2026-10-27 11:26:04 [info]    Conexión a MongoDB establecida (127.0.0.1/shipnow)
+2026-10-27 11:26:14 [warning] Pedido 6650a1b2c3d4e5f6a7b8c9d2 sin repartidor asignado (entrega SN-7YFCX59YXV)
+2026-10-27 11:26:14 [warning] GET /api/mocks/users?qty=-3 → 400 INVALID_MOCK_QUANTITY: "qty" no puede ser negativo {"details":{...}}
+2026-10-27 11:26:14 [http]    GET /api/mocks/users?qty=-3 400 - 1.4 ms
+```
+
+### Comportamiento según el entorno
+
+| Entorno (`NODE_ENV`) | Nivel mínimo | Consola | Archivos |
+| --- | --- | --- | --- |
+| `development` | `debug` | Sí (con colores) | Sí |
+| `production` | `info` | No | Sí |
+| `test` | `info` | No (la salida de Mocha queda limpia) | Sí, en `logs/test/` |
+
+El nivel mínimo se puede cambiar con la variable `LOG_LEVEL`.
+
+### Archivos de log y rotación
+
+Los archivos se guardan en la carpeta `logs/` (configurable con `LOG_DIR`):
+
+| Archivo | Contenido |
+| --- | --- |
+| `logs/error-AAAA-MM-DD.log` | Solo `error` y `fatal` |
+| `logs/combined-AAAA-MM-DD.log` | Toda la actividad desde el nivel configurado |
+
+**Rotación** (con `winston-daily-rotate-file`): se crea un archivo nuevo por día, cada archivo puede pesar como máximo 20 MB y se conservan los últimos **14 días**; los más viejos se borran solos. Los valores están en `LOG_ROTATION` (constantes).
+
+**Git:** la carpeta `logs/` existe en el repositorio solo con un `.gitkeep`. Los archivos que genera la app (`logs/*`, `*.log`) están en `.gitignore` y nunca se suben.
+
+### Integración con el manejo de errores
+
+El middleware global de errores registra cada error antes de responder (el logger complementa al manejo de errores, no lo reemplaza: la respuesta al cliente no cambia):
+
+- Errores **4xx** (esperados, de negocio) → `warning`, con el código y los `details`.
+- Errores **5xx** (inesperados) → `error`, con el stack del error original (que nunca se envía al cliente).
+- Fallas al arrancar (configuración inválida, MongoDB inaccesible) y excepciones no controladas → `fatal`. La app espera a que el log se escriba en el archivo y termina con código 1.
+
+### Endpoint de prueba del logger
+
+`GET /api/logger/test` es una **herramienta interna**, no una funcionalidad de negocio. Genera un log de cada nivel y devuelve qué niveles están activos en el entorno actual y a qué salidas llegó cada uno:
+
+```bash
+curl http://localhost:8080/api/logger/test
+```
+
+```json
+{
+  "status": "success",
+  "message": "Se generó un log de prueba por cada nivel",
+  "payload": {
+    "environment": "development",
+    "activeLevel": "debug",
+    "consoleEnabled": true,
+    "logDir": "logs",
+    "files": {
+      "error": "error-AAAA-MM-DD.log (solo niveles error y fatal)",
+      "combined": "combined-AAAA-MM-DD.log (desde el nivel debug)"
+    },
+    "levels": [
+      { "level": "debug", "priority": 5, "enabled": true, "writtenTo": ["combined", "console"] },
+      { "level": "http", "priority": 4, "enabled": true, "writtenTo": ["combined", "console"] },
+      { "level": "info", "priority": 3, "enabled": true, "writtenTo": ["combined", "console"] },
+      { "level": "warning", "priority": 2, "enabled": true, "writtenTo": ["combined", "console"] },
+      { "level": "error", "priority": 1, "enabled": true, "writtenTo": ["combined", "error", "console"] },
+      { "level": "fatal", "priority": 0, "enabled": true, "writtenTo": ["combined", "error", "console"] }
+    ]
+  }
+}
+```
+
+Después de llamarlo se puede verificar que `logs/error-AAAA-MM-DD.log` tiene **solo** las líneas `[error]` y `[fatal]`, y que `logs/combined-AAAA-MM-DD.log` tiene todas. En `production`, `debug` y `http` aparecen con `"enabled": false`.
+
+## Documentación con Swagger (pre-entrega 5)
+
+Con el servidor levantado (`npm run dev`):
+
+- **Swagger UI:** http://localhost:8080/api/docs
+- **Especificación OpenAPI (JSON):** http://localhost:8080/api/docs/openapi.json
+
+### Organización
+
+La documentación está **separada de la lógica de rutas**:
+
+- [`src/docs/openapi.js`](src/docs/openapi.js): información general (nombre, versión, descripción, propósito, servidor local) y tags.
+- [`src/docs/paths/`](src/docs/paths): un archivo por módulo (`users`, `products`, `orders`, `deliveries`, `mocks`, `logger`).
+- [`src/docs/components/`](src/docs/components): schemas, respuestas y parámetros reutilizables.
+- [`src/config/swagger.config.js`](src/config/swagger.config.js): monta Swagger UI en `/api/docs`.
+
+Módulos documentados (un tag por módulo): **Users**, **Products**, **Orders**, **Deliveries**, **Mocks** y **Logger**. Cada endpoint indica método, ruta, descripción, parámetros de ruta y query, body esperado, respuesta exitosa y todas las respuestas de error posibles con ejemplos.
+
+**Schemas reutilizables:** `User`, `Product`, `Order`, `OrderItem`, `Delivery`, `DeliveryTracking`, `Address`, `SuccessResponse`, `ErrorResponse`, `Pagination`, los bodies de entrada (`UserCreate`, `OrderCreate`, `DeliveryStatusUpdate`, ...) y los de mocks (`MockUser`, `MockOrder`, `MockGenerateDataInput`, ...).
+
+### Por qué la documentación coincide con la API real
+
+- **Los enums salen de las constantes del proyecto** (`USER_ROLES`, `ORDER_STATUS`, `DELIVERY_STATUS`, ...): si cambia un estado, cambia también en Swagger.
+- **Los ejemplos de error se generan instanciando las clases de error reales** (`new OrderNotFoundError(...)`, `new InvalidMockQuantityError(...)`): el `code`, el `statusCode` y el `message` documentados son los mismos que devuelve el middleware global.
+- **Hay tests que lo verifican** (`tests/docs.test.js`): que cada ruta documentada exista en la API con el método documentado y que cada operación tenga respuesta exitosa y respuestas de error.
+
+### Errores documentados
+
+| Caso | Código | HTTP |
+| --- | --- | --- |
+| Datos inválidos / incompletos | `VALIDATION_ERROR`, `INVALID_ID`, `INVALID_JSON` | 400 |
+| Recurso no encontrado | `USER_NOT_FOUND`, `ORDER_NOT_FOUND`, `DELIVERY_NOT_FOUND`, `PRODUCT_NOT_FOUND` | 404 |
+| Estado inválido en pedidos/entregas | `INVALID_STATUS` (400), `INVALID_STATUS_TRANSITION`, `INVALID_STATE` (409) | 400 / 409 |
+| Cantidad inválida en mocks | `INVALID_MOCK_QUANTITY` | 400 |
+| Conflictos y reglas de negocio | `EMAIL_ALREADY_EXISTS`, `INSUFFICIENT_STOCK`, `DELIVERY_ALREADY_EXISTS`, `INVALID_ROLE`, ... | 409 / 422 |
+| Error interno / base de datos | `INTERNAL_SERVER_ERROR`, `MOCK_SEED_FAILED` / `DATABASE_ERROR` | 500 / 503 |
+
+**Autenticación:** esta versión de la API no tiene autenticación, por eso no hay errores 401/403 documentados.
+
+### Aclaraciones para probar desde Swagger
+
+1. Abrir un endpoint, tocar **Try it out**, completar parámetros/body y **Execute**.
+2. Para tener datos, ejecutar primero `POST /api/mocks/generateData` (tag **Mocks**) y copiar ids desde `GET /api/users`, `GET /api/orders`, etc.
+3. Flujo completo de un envío: `POST /api/orders` → `PATCH /api/orders/{id}/status` con `confirmed` → `POST /api/deliveries` → `PATCH /api/deliveries/{id}/assign` → `PATCH /api/deliveries/{id}/status` (`in_transit`, `delivered`) → `GET /api/deliveries/tracking/{trackingCode}`.
+
+## Testing (pre-entrega 6)
+
+### Herramientas
+
+| Herramienta | Para qué se usa |
+| --- | --- |
+| **Mocha** | Organiza y ejecuta los tests (`describe` / `it`, hooks `beforeAll`, `beforeEach`, `afterAll`) |
+| **Chai** | Aserciones (`expect`) sobre status, headers y estructura del body |
+| **Supertest** | Hace las peticiones HTTP contra la app de Express **sin levantar un puerto** (importa `src/app.js`, que está separado de `src/server.js`) |
+| **mongodb-memory-server** | Base de datos MongoDB en memoria, exclusiva para los tests |
+
+### Cómo ejecutarlos
+
+```bash
+npm install
+npm test
+```
+
+No hace falta levantar el servidor ni tener MongoDB instalado. La configuración de Mocha está en `.mocharc.json`.
+
+### Entorno de testing separado
+
+- **Variables propias:** `npm test` carga `.env.test` (no `.env`). Ese archivo se versiona porque no tiene secretos:
+
+  | Variable | Valor en test |
+  | --- | --- |
+  | `NODE_ENV` | `test` |
+  | `PORT` | `8081` (obligatoria por la validación; los tests no abren el puerto) |
+  | `MONGODB_URI` | Vacía → base en memoria (ver abajo) |
+  | `LOG_LEVEL` / `LOG_DIR` | `info` / `logs/test` (sin consola, para que la salida de Mocha quede limpia) |
+
+- **Base de datos separada:** si `MONGODB_URI` está vacía, `tests/setup.js` levanta un **MongoDB en memoria** (`shipnow_test`) que se crea al empezar y se destruye al terminar. No se requiere ninguna base de testing. La primera vez que se corre `npm install`, `mongodb-memory-server` descarga el binario de MongoDB.
+- **Opcional:** para correr contra un MongoDB real, completar `MONGODB_URI` en `.env.test` con una base **distinta** a la de desarrollo, por ejemplo `mongodb://127.0.0.1:27017/shipnow_test`. Por seguridad, los tests **se niegan a correr** si el nombre de la base no contiene `test`.
+
+### Datos de prueba y limpieza
+
+- **Datos controlados:** cada test crea sus propios datos a través de la API, usando los generadores de mocks como base (`tests/helpers/fixtures.js`). Ejemplo: para probar un pedido, primero se crea un cliente y un producto válidos. No se usan datos cargados a mano.
+- **Limpieza:** un hook global `beforeEach` (en `tests/setup.js`) **vacía todas las colecciones antes de cada test**, y `afterAll` limpia, cierra la conexión y apaga la base en memoria. Ningún test depende del estado previo de la base ni del orden de ejecución, y la suite pasa siempre, aunque se corra varias veces seguidas.
+
+### Qué valida cada test
+
+No alcanza con que el endpoint "responda": cada test verifica el **status HTTP**, el **formato** de la respuesta y sus **propiedades importantes**. Los helpers de `tests/helpers/assertions.js` validan la estructura completa:
+
+- éxito: `{ status: 'success', payload, pagination? }`
+- error: `{ status: 'error', statusCode, code, message, path, method, timestamp }`, con el `code` del diccionario de errores y sin exponer el stack
+
+### Módulos cubiertos
+
+| Archivo | Qué cubre |
+| --- | --- |
+| `tests/users.test.js` | Listado (paginación, filtro por rol, sin contraseña), alta, consulta, actualización y baja; errores 400 (datos incompletos, campo no permitido, repartidor sin vehículo), 404, 409 |
+| `tests/products.test.js` | Estado calculado según stock, catálogo sin productos agotados, código duplicado, 404 |
+| `tests/orders.test.js` | **Flujo principal:** crear pedido (totales, descuento de stock), listar, consultar por id, modificar, cambiar estado (confirmar, cancelar con devolución de stock), eliminar; errores de datos incompletos, JSON inválido, 404, stock insuficiente, rol inválido, estado inválido y transición inválida |
+| `tests/deliveries.test.js` | Crear entrega, asignar repartidor, `in_transit` → `delivered` sincronizando el pedido, tracking público; errores de estado, transición, rol y recurso inexistente |
+| `tests/mocks.test.js` | Generación sin guardar (users, couriers, products, orders, deliveries, dataset con relaciones), cantidades inválidas (negativa, cero, no numérica, decimal, mayor al máximo), `seed` y `generateData` con verificación en la base |
+| `tests/logger.test.js` | Endpoint de prueba del logger (niveles activos en test y salidas) y método no soportado |
+| `tests/docs.test.js` | Swagger UI, `openapi.json` (tags y schemas), coherencia entre la documentación y las rutas reales |
+| `tests/errors.test.js` | Ruta inexistente (404), JSON inválido (400), body demasiado grande (413) |
+
+Resultado actual: **100 tests pasando**.

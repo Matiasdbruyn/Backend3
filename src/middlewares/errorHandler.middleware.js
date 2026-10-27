@@ -9,6 +9,7 @@ import {
   PayloadTooLargeError,
   ValidationError,
 } from '../errors/index.js';
+import { logger } from '../utils/logger.js';
 
 const DATABASE_ERROR_NAMES = [
   'MongoNetworkError',
@@ -44,16 +45,29 @@ const normalizeError = (err) => {
 };
 
 /**
+ * - Errores esperados / de negocio (4xx): warning. Son problemas del cliente.
+ * - Errores del servidor (5xx): error, con el stack del error original.
+ */
+const logError = (error, req) => {
+  const where = `${req.method} ${req.originalUrl} → ${error.statusCode} ${error.code}`;
+
+  if (error.statusCode >= HTTP_STATUS.INTERNAL_SERVER_ERROR) {
+    const original = error.cause ?? error;
+    logger.error(`${where}: ${original.message}`, { stack: original.stack });
+    return;
+  }
+  const meta = error.details !== undefined ? { details: error.details } : {};
+  logger.warning(`${where}: ${error.message}`, meta);
+};
+
+/**
  * Middleware global de errores: es el ÚNICO lugar de la app que arma
  * respuestas de error. Siempre responde con la misma estructura JSON.
  */
 // eslint-disable-next-line no-unused-vars
 export const errorHandler = (err, req, res, next) => {
   const error = normalizeError(err);
-
-  if (error.statusCode >= HTTP_STATUS.INTERNAL_SERVER_ERROR) {
-    console.error(`[error] ${req.method} ${req.originalUrl} →`, error.cause ?? err);
-  }
+  logError(error, req);
 
   if (res.headersSent) return next(err);
 

@@ -1,13 +1,15 @@
 # Dependencias
 node_modules/
 
-# Variables de entorno (solo se versiona .env.example)
+# Variables de entorno (se versionan solo .env.example y .env.test, que no tienen secretos)
 .env
 .env.*
 !.env.example
+!.env.test
 
 # Logs
-logs/
+logs/*
+!logs/.gitkeep
 *.log
 npm-debug.log*
 

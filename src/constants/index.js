@@ -157,6 +157,43 @@ export const MOCK_COLLECTIONS = Object.freeze({
   ORDERS: 'orders',
 });
 
+// ─── Logging ─────────────────────────────────────────────────────────────────
+
+// Niveles de Winston: cuanto más bajo el número, más grave el evento.
+export const LOG_LEVELS = Object.freeze({
+  fatal: 0,
+  error: 1,
+  warning: 2,
+  info: 3,
+  http: 4,
+  debug: 5,
+});
+
+export const LOG_COLORS = Object.freeze({
+  fatal: 'bold white redBG',
+  error: 'red',
+  warning: 'yellow',
+  info: 'green',
+  http: 'magenta',
+  debug: 'cyan',
+});
+
+// Nivel mínimo que se registra en cada entorno (se puede pisar con LOG_LEVEL).
+export const DEFAULT_LOG_LEVEL_BY_ENV = Object.freeze({
+  [NODE_ENVS.DEVELOPMENT]: 'debug',
+  [NODE_ENVS.PRODUCTION]: 'info',
+  [NODE_ENVS.TEST]: 'info',
+});
+
+// Rotación de archivos: uno por día, máximo 20 MB cada uno, se conservan 14 días.
+export const LOG_ROTATION = Object.freeze({
+  DATE_PATTERN: 'YYYY-MM-DD',
+  MAX_SIZE: '20m',
+  MAX_FILES: '14d',
+});
+
+export const DEFAULT_LOG_DIR = 'logs';
+
 // ─── HTTP ────────────────────────────────────────────────────────────────────
 
 export const HTTP_STATUS = Object.freeze({

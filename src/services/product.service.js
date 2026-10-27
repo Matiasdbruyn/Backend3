@@ -6,6 +6,7 @@ import {
 } from '../errors/index.js';
 import { productRepository } from '../repositories/product.repository.js';
 import { assertValidId } from '../utils/ids.js';
+import { logger } from '../utils/logger.js';
 import { buildPagination } from '../utils/pagination.js';
 import {
   createProductSchema,
@@ -46,10 +47,12 @@ export class ProductService {
     if (await this.productRepository.existsByCode(payload.code)) {
       throw new ProductCodeAlreadyExistsError(payload.code);
     }
-    return this.productRepository.create({
+    const product = await this.productRepository.create({
       ...payload,
       status: resolveProductStatus(payload.stock),
     });
+    logger.info(`Producto ${product._id} creado (${product.code}, stock ${product.stock})`);
+    return product;
   }
 
   async updateProduct(id, data) {
@@ -61,13 +64,16 @@ export class ProductService {
     }
     if (changes.stock !== undefined) changes.status = resolveProductStatus(changes.stock);
 
-    return this.productRepository.updateById(id, changes);
+    const updated = await this.productRepository.updateById(id, changes);
+    logger.info(`Producto ${id} actualizado (${Object.keys(changes).join(', ')})`);
+    return updated;
   }
 
   async deleteProduct(id) {
     assertValidId(id);
     const deleted = await this.productRepository.deleteById(id);
     if (!deleted) throw new ProductNotFoundError({ id });
+    logger.info(`Producto ${id} eliminado (${deleted.code})`);
     return deleted;
   }
 
@@ -86,6 +92,7 @@ export class ProductService {
           throw new InsufficientStockError({ productId, requested: quantity });
         }
         reserved.push({ productId, quantity });
+        logger.debug(`Stock reservado: ${quantity} u. del producto ${productId} (quedan ${updated.stock})`);
         await this.#syncStatus(updated);
       }
     } catch (error) {
@@ -97,14 +104,21 @@ export class ProductService {
   async releaseStock(items) {
     for (const { productId, quantity } of items) {
       const updated = await this.productRepository.incrementStock(productId, quantity);
-      if (updated) await this.#syncStatus(updated);
+      if (!updated) continue;
+      logger.debug(`Stock devuelto: ${quantity} u. al producto ${productId} (ahora ${updated.stock})`);
+      await this.#syncStatus(updated);
     }
   }
 
   async #syncStatus(product) {
     const status = resolveProductStatus(product.stock);
-    if (status !== product.status) {
-      await this.productRepository.updateById(product._id, { status });
+    if (status === product.status) return;
+
+    await this.productRepository.updateById(product._id, { status });
+    if (status === PRODUCT_STATUS.OUT_OF_STOCK) {
+      logger.warning(`Producto ${product._id} (${product.code}) se quedó sin stock`);
+    } else {
+      logger.info(`Producto ${product._id} (${product.code}) vuelve a tener stock`);
     }
   }
 }

@@ -23,6 +23,7 @@ import { orderRepository } from '../repositories/order.repository.js';
 import { productRepository } from '../repositories/product.repository.js';
 import { userRepository } from '../repositories/user.repository.js';
 import { assertValidId } from '../utils/ids.js';
+import { logger } from '../utils/logger.js';
 import { buildPagination } from '../utils/pagination.js';
 import { validate } from '../validators/common.validator.js';
 import {
@@ -108,8 +109,9 @@ export class OrderService {
 
     // Se descuenta el stock al crear el pedido; si falla el guardado se devuelve.
     await this.productService.reserveStock(items);
+    let order;
     try {
-      return await this.orderRepository.create({
+      order = await this.orderRepository.create({
         user: payload.userId,
         items: orderItems,
         priority: payload.priority,
@@ -120,8 +122,15 @@ export class OrderService {
       });
     } catch (error) {
       await this.productService.releaseStock(items);
+      logger.error(`Falló la creación del pedido del usuario ${payload.userId}: ${error.message}`);
       throw error;
     }
+
+    logger.info(
+      `Pedido ${order._id} creado para el usuario ${payload.userId}: ${orderItems.length} ítem(s), ` +
+        `total $${order.total} (prioridad ${order.priority})`,
+    );
+    return order;
   }
 
   async updateOrder(id, data) {
@@ -137,7 +146,9 @@ export class OrderService {
     if (changes.priority && changes.priority !== order.priority) {
       Object.assign(changes, calculateOrderTotals(order.items, changes.priority));
     }
-    return this.orderRepository.updateById(id, changes);
+    const updated = await this.orderRepository.updateById(id, changes);
+    logger.info(`Pedido ${id} actualizado (${Object.keys(changes).join(', ')})`);
+    return updated;
   }
 
   async updateOrderStatus(id, data) {
@@ -174,6 +185,7 @@ export class OrderService {
       await this.productService.releaseStock(toStockItems(order.items));
     }
     await this.deliveryRepository.deleteByOrderId(id);
+    logger.info(`Pedido ${id} eliminado (estado: ${order.status})`);
     return order;
   }
 
@@ -192,6 +204,7 @@ export class OrderService {
     if (to === ORDER_STATUS.CANCELLED) {
       await this.productService.releaseStock(toStockItems(order.items));
     }
+    logger.info(`Pedido ${order._id}: estado "${order.status}" → "${to}"`);
     return updated;
   }
 
@@ -211,6 +224,7 @@ export class OrderService {
         { status: DELIVERY_STATUS.CANCELLED },
         { status: DELIVERY_STATUS.CANCELLED, note: 'Pedido cancelado', changedAt: new Date() },
       );
+      logger.info(`Entrega ${delivery.trackingCode} cancelada junto con el pedido ${order._id}`);
     }
     return cancelled;
   }
